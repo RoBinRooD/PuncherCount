@@ -8,11 +8,46 @@
     <link rel="icon" href="./icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="./icon-192.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;800&display=swap" rel="stylesheet" />
+    <!-- non-blocking font load: a slow font server must not keep the page blank -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
     <title>PuncherCount</title>
+    <style>
+      html, body { margin: 0; background: #121211; color: #f0efec; font-family: system-ui, sans-serif; }
+      #boot-error { display: none; padding: 16px; white-space: pre-wrap; word-break: break-word; font-size: 14px; }
+      #boot-error button { margin-top: 12px; padding: 8px 16px; border-radius: 999px; border: 0; background: #e66767; color: #000; font-weight: 700; }
+    </style>
+    <script>
+      // Show startup errors on screen instead of a blank page.
+      (function () {
+        function show(msg) {
+          var el = document.getElementById('boot-error')
+          if (!el) return
+          el.style.display = 'block'
+          el.querySelector('pre').textContent += msg + '\n'
+        }
+        window.__showBootError = show
+        window.addEventListener('error', function (e) {
+          var src = e.target && (e.target.src || e.target.href)
+          if (src && /fonts\.(googleapis|gstatic)\.com/.test(src)) return // optional font
+          show('Error: ' + (e.message || (e.target && (e.target.src || e.target.href)) || 'unknown'))
+        }, true)
+        window.addEventListener('unhandledrejection', function (e) {
+          show('Error: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason))
+        })
+        setTimeout(function () {
+          var root = document.getElementById('root')
+          if (root && !root.children.length) show('แอปโหลดไม่สำเร็จภายใน 10 วินาที (' + navigator.userAgent + ')')
+        }, 10000)
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot-error">
+      <strong>เกิดข้อผิดพลาด กรุณาแคปหน้าจอนี้ส่งให้ผู้พัฒนา</strong>
+      <pre></pre>
+      <button onclick="location.reload()">โหลดใหม่</button>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
