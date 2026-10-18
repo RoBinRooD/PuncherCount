@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DetectorConfig } from '../lib/detector'
 import type { Settings } from '../lib/settings'
-import { deleteClip, listClips, saveClip } from '../lib/db'
+import { deleteClip, listClips, saveClip, updateClip } from '../lib/db'
 import { extractClipFrames } from '../lib/clipVideo'
-import { calibrate, evaluate, extractAll, type Calibration, type ClipLabel, type TrainingClip } from '../lib/trainer'
+import { calibrate, evaluate, extractAll, type Calibration, type ClipLabel, type ClipResult, type TrainingClip } from '../lib/trainer'
 import { HAND_LABEL, PUNCH_LABEL, punchType, type Hand, type PunchKind } from '../lib/types'
 import { HAND_COLOR } from '../lib/colors'
 import { drawSkeleton } from '../components/skeleton'
@@ -98,13 +98,19 @@ export default function Teach({ settings, update }: Props) {
     void reload()
   }
 
+  const edit = async (c: TrainingClip, patch: Pick<TrainingClip, 'label' | 'expectedCount'>) => {
+    if (c.id === undefined) return
+    await updateClip(c.id, patch)
+    setCal(null)
+    void reload()
+  }
+
   const runCalibration = async () => {
     if (!clips) return
     setCal('running')
     setCal(await calibrate(clips, config))
   }
 
-  const lead: Hand = config.stance === 'orthodox' ? 'left' : 'right'
   const pct = (n: number, d: number) => `${Math.round((n / d) * 100)}%`
 
   return (
@@ -121,23 +127,17 @@ export default function Teach({ settings, update }: Props) {
       </Section>
 
       <Section title="เพิ่มคลิป">
-        <Row label="ประเภทหมัด">
+        <Row label="สไตล์การยืน (ใช้กับทุกคลิปและตอนฝึก)">
           <Segmented
-            value={label.kind}
-            options={KINDS.map((k) => [k, k === 'straight' ? 'หมัดตรง' : PUNCH_LABEL[k].split(' ')[0]] as [PunchKind, string])}
-            onChange={(kind) => setLabel({ ...label, kind })}
+            value={config.stance}
+            options={[
+              ['orthodox', 'Orthodox (แย็บมือซ้าย)'],
+              ['southpaw', 'Southpaw (แย็บมือขวา)'],
+            ]}
+            onChange={(stance) => update({ detector: { ...config, stance } })}
           />
         </Row>
-        <Row label="มือที่ชก">
-          <Segmented
-            value={label.hand}
-            options={HANDS.map((h) => [h, `${HAND_LABEL[h]} (${h === lead ? 'มือหน้า' : 'มือหลัง'})`] as [Hand, string])}
-            onChange={(hand) => setLabel({ ...label, hand })}
-          />
-        </Row>
-        {label.kind !== 'uppercut' && (
-          <Toggle label="หมัดเข้าลำตัว" checked={label.body} onChange={(body) => setLabel({ ...label, body })} />
-        )}
+        <LabelFields label={label} config={config} onChange={setLabel} />
         <label className="flex items-center justify-between gap-2">
           <span className="text-sm text-ink-2">
             จำนวนหมัดในคลิป
@@ -256,31 +256,141 @@ export default function Teach({ settings, update }: Props) {
           </Section>
 
           <Section title={`คลิป (${clips.length})`}>
-            {clips.map((c, i) => {
-              const r = results[i]
-              const n = c.expectedCount
-              const off = n !== undefined && r.found !== n
-              return (
-                <div key={c.id} className="flex items-center gap-2 border-t border-line pt-2 first:border-0 first:pt-0">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold" style={{ color: HAND_COLOR[c.label.hand] }}>
-                      {labelText(c.label, config)}
-                    </div>
-                    <div className="truncate text-xs text-ink-3">{c.name}</div>
-                    <div className={`text-xs ${off || r.other > 0 ? 'text-accent' : 'text-ink-2'}`}>
-                      พบ {r.found}
-                      {n !== undefined ? `/${n}` : ''} หมัด
-                      {r.other > 0 ? ` · มืออีกข้างขยับ ${r.other}` : ''}
-                    </div>
-                  </div>
-                  <button onClick={() => c.id !== undefined && remove(c.id)} className="rounded-full bg-panel-2 px-3 py-1 text-xs">
-                    ลบ
-                  </button>
-                </div>
-              )
-            })}
+            {clips.map((c, i) => (
+              <ClipRow
+                key={c.id}
+                clip={c}
+                result={results[i]}
+                config={config}
+                onSave={(patch) => edit(c, patch)}
+                onRemove={() => c.id !== undefined && remove(c.id)}
+                onSwap={() => update({ detector: { ...config, swapHands: !config.swapHands } })}
+              />
+            ))}
           </Section>
         </>
+      )}
+    </div>
+  )
+}
+
+function LabelFields({ label, config, onChange }: { label: ClipLabel; config: DetectorConfig; onChange: (l: ClipLabel) => void }) {
+  const lead: Hand = config.stance === 'orthodox' ? 'left' : 'right'
+  return (
+    <>
+      <Row label="ประเภทหมัด">
+        <Segmented
+          value={label.kind}
+          options={KINDS.map((k) => [k, k === 'straight' ? 'หมัดตรง' : PUNCH_LABEL[k].split(' ')[0]] as [PunchKind, string])}
+          onChange={(kind) => onChange({ ...label, kind, body: kind === 'uppercut' ? false : label.body })}
+        />
+      </Row>
+      <Row label="มือที่ชก (มือจริงของผู้ชก)">
+        <Segmented
+          value={label.hand}
+          options={HANDS.map((h) => [h, `${HAND_LABEL[h]} (${h === lead ? 'มือหน้า' : 'มือหลัง'})`] as [Hand, string])}
+          onChange={(hand) => onChange({ ...label, hand })}
+        />
+      </Row>
+      {label.kind !== 'uppercut' && (
+        <Toggle label="หมัดเข้าลำตัว" checked={label.body} onChange={(body) => onChange({ ...label, body })} />
+      )}
+    </>
+  )
+}
+
+interface ClipRowProps {
+  clip: TrainingClip
+  result: ClipResult
+  config: DetectorConfig
+  onSave: (patch: Pick<TrainingClip, 'label' | 'expectedCount'>) => void
+  onRemove: () => void
+  onSwap: () => void
+}
+
+function ClipRow({ clip, result: r, config, onSave, onRemove, onSwap }: ClipRowProps) {
+  const [editing, setEditing] = useState(false)
+  const [label, setLabel] = useState(clip.label)
+  const [count, setCount] = useState(clip.expectedCount ? String(clip.expectedCount) : '')
+  const n = clip.expectedCount
+  const off = n !== undefined && r.found !== n
+  // In a one-punch clip the punching arm moves most. If that's the other arm, either the label
+  // is wrong or the pose model has the arms swapped (common for the arm away from the camera).
+  const mismatch = r.other >= 3 && r.other > r.found
+  const otherHand: Hand = clip.label.hand === 'left' ? 'right' : 'left'
+
+  const startEdit = () => {
+    setLabel(clip.label)
+    setCount(clip.expectedCount ? String(clip.expectedCount) : '')
+    setEditing(true)
+  }
+
+  return (
+    <div className="flex flex-col gap-2 border-t border-line pt-2 first:border-0 first:pt-0">
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold" style={{ color: HAND_COLOR[clip.label.hand] }}>
+            {labelText(clip.label, config)}
+          </div>
+          <div className="truncate text-xs text-ink-3">{clip.name}</div>
+          <div className={`text-xs ${off || r.other > 0 ? 'text-accent' : 'text-ink-2'}`}>
+            พบ {r.found}
+            {n !== undefined ? `/${n}` : ''} หมัด
+            {r.other > 0 ? ` · มืออีกข้างขยับ ${r.other}` : ''}
+          </div>
+        </div>
+        {!editing && (
+          <button onClick={startEdit} className="rounded-full bg-panel-2 px-3 py-1 text-xs">
+            แก้ไข
+          </button>
+        )}
+        <button onClick={onRemove} className="rounded-full bg-panel-2 px-3 py-1 text-xs">
+          ลบ
+        </button>
+      </div>
+
+      {mismatch && !editing && (
+        <div className="flex flex-col gap-2 rounded-xl bg-panel-2 p-3 text-xs text-ink-2">
+          <p>
+            แขนที่ขยับเป็นหลักในคลิปนี้ถูกตรวจเป็น<b className="text-ink">มือ{HAND_LABEL[otherHand]}</b> ({r.other} ครั้ง)
+            ถ้าป้ายถูกแล้ว แปลว่าระบบสลับแขนซ้าย/ขวา (เกิดบ่อยกับแขนข้างที่อยู่ไกลกล้อง)
+          </p>
+          <button onClick={onSwap} className="self-start rounded-full bg-ink px-3 py-1.5 font-semibold text-black">
+            {config.swapHands ? 'ปิด' : 'เปิด'} "สลับซ้าย/ขวา"
+          </button>
+        </div>
+      )}
+
+      {editing && (
+        <div className="flex flex-col gap-3 rounded-xl bg-panel-2/50 p-3">
+          <LabelFields label={label} config={config} onChange={setLabel} />
+          <label className="flex items-center justify-between gap-2">
+            <span className="text-sm text-ink-2">จำนวนหมัดในคลิป</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              placeholder="—"
+              className="tabular w-20 rounded-lg bg-panel-2 py-1.5 text-center"
+              value={count}
+              onChange={(e) => setCount(e.target.value)}
+            />
+          </label>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                onSave({ label, expectedCount: Number(count) > 0 ? Math.round(Number(count)) : undefined })
+                setEditing(false)
+              }}
+              className="rounded-full bg-ink px-4 py-1.5 text-sm font-semibold text-black"
+            >
+              บันทึก
+            </button>
+            <button onClick={() => setEditing(false)} className="rounded-full bg-panel-2 px-4 py-1.5 text-sm">
+              ยกเลิก
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )

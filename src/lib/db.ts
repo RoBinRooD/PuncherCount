@@ -19,6 +19,7 @@ export const listSessions = () => db.sessions.orderBy('startedAt').reverse().toA
 
 export const saveClip = (c: TrainingClip) => db.clips.add(c)
 export const deleteClip = (id: number) => db.clips.delete(id)
+export const updateClip = (id: number, patch: Partial<TrainingClip>) => db.clips.update(id, patch)
 export const listClips = () => db.clips.orderBy('createdAt').toArray()
 
 /** Add the sessions and clips from a backup that aren't already here. Returns how many were added. */
