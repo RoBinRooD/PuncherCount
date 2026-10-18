@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Bar } from 'react-chartjs-2'
 import { barStyle, stackedScales } from '../components/charts'
-import { importSessions, listSessions } from '../lib/db'
-import { exportCsv, exportJson } from '../lib/export'
+import { importBackup, listClips, listSessions } from '../lib/db'
+import { exportCsv, exportJson, parseBackup } from '../lib/export'
 import { formatDate, formatDuration, ppm, sessionPunches, sessionWorkMs, tally } from '../lib/stats'
 import { HAND_COLOR } from '../lib/colors'
 import type { SessionRecord } from '../lib/types'
@@ -37,8 +37,8 @@ export default function History() {
   const onImport = async (f: File | undefined) => {
     if (!f) return
     try {
-      const n = await importSessions(JSON.parse(await f.text()))
-      setMsg(`นำเข้า ${n} เซต`)
+      const n = await importBackup(parseBackup(JSON.parse(await f.text())))
+      setMsg(`นำเข้า ${n.sessions} เซต · ${n.clips} คลิปสอนท่า`)
       void reload()
     } catch {
       setMsg('ไฟล์ไม่ถูกต้อง')
@@ -110,7 +110,7 @@ export default function History() {
       </div>
 
       <div className="flex flex-wrap gap-2 text-sm">
-        <button className="rounded-full bg-panel-2 px-4 py-2" onClick={() => exportJson(sessions)}>
+        <button className="rounded-full bg-panel-2 px-4 py-2" onClick={async () => exportJson(sessions, await listClips())}>
           ส่งออก JSON (สำรองข้อมูล)
         </button>
         <button className="rounded-full bg-panel-2 px-4 py-2" onClick={() => exportCsv(sessions)}>
@@ -119,7 +119,10 @@ export default function History() {
         <button className="rounded-full bg-panel-2 px-4 py-2" onClick={() => fileRef.current?.click()}>
           นำเข้า JSON
         </button>
-        <input ref={fileRef} type="file" accept="application/json" hidden onChange={(e) => onImport(e.target.files?.[0])} />
+        <input ref={fileRef} type="file" accept="application/json" hidden onChange={(e) => {
+          void onImport(e.target.files?.[0])
+          e.target.value = ''
+        }} />
       </div>
       {msg && <p className="text-sm text-ink-2">{msg}</p>}
     </div>
