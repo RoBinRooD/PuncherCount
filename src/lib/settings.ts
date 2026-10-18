@@ -8,6 +8,8 @@ export interface Settings {
   prepSec: number
   camera: 'environment' | 'user'
   showDebug: boolean
+  /** Classify punch types with the model learned from labeled clips (when there are any). */
+  useClipModel: boolean
   detector: DetectorConfig
 }
 
@@ -18,6 +20,7 @@ export const DEFAULT_SETTINGS: Settings = {
   prepSec: 10,
   camera: 'environment',
   showDebug: false,
+  useClipModel: true,
   detector: DEFAULT_DETECTOR_CONFIG,
 }
 

@@ -1,4 +1,4 @@
-import type { Hand, PunchEvent, Stance } from './types'
+import type { Hand, PunchEvent, PunchKind, Stance } from './types'
 
 /**
  * Punch detector for a side-on camera (phone placed beside the bag, boxer seen in profile).
@@ -13,6 +13,9 @@ import type { Hand, PunchEvent, Stance } from './types'
  *  - straight: moves forward and the arm extends (jab = lead hand, cross = rear hand)
  *
  * Movements that go backwards (retracting the hand to guard) are ignored.
+ *
+ * Segmentation (finding fast outward movements) and classification are separate: the
+ * classifier is pluggable so a model trained from labeled clips can replace the heuristic.
  */
 
 export interface Landmark {
@@ -82,6 +85,52 @@ function angleDeg(a: Vec, b: Vec, c: Vec): number {
   return (Math.acos(cos) * 180) / Math.PI
 }
 
+/** Geometry of one detected movement, in torso lengths with +fwd = towards the bag, +up = up. */
+export interface PunchFeatures {
+  /** displacement start -> furthest point */
+  fwd: number
+  up: number
+  dist: number
+  /** wrist relative to the shoulder at the furthest point / at the start */
+  peakFwd: number
+  peakUp: number
+  startFwd: number
+  startUp: number
+  /** elbow angle (degrees) at the furthest point / at the start */
+  peakElbow: number
+  startElbow: number
+  /** how much further from the shoulder the wrist ends up */
+  extGain: number
+  durMs: number
+  /** wrist path length / straight-line distance (1 = straight line) */
+  path: number
+}
+
+export interface PunchCandidate {
+  /** frame timestamp (ms) when the movement ended */
+  t: number
+  hand: Hand
+  lead: boolean
+  features: PunchFeatures
+}
+
+export type Classification = { kind: PunchKind; body: boolean }
+export type Classifier = (c: PunchCandidate, config: DetectorConfig) => Classification | null
+
+/** Rule-based classifier used when no trained model is available. */
+export function classifyHeuristic(c: PunchCandidate, config: DetectorConfig): Classification | null {
+  const f = c.features
+  if (f.up >= config.uppercutRatio * f.dist && f.up > Math.abs(f.fwd) * 0.8) return { kind: 'uppercut', body: false }
+  // Wrist ends well below the shoulder line -> body shot.
+  const body = f.peakUp < -0.45
+  if (f.fwd > 0.3 * f.dist) {
+    if (f.peakElbow < config.hookElbowAngle) return { kind: 'hook', body }
+    if (f.extGain > 0.1) return { kind: 'straight', body }
+  }
+  // Backwards / downward movement: hand returning to guard.
+  return null
+}
+
 interface ArmState {
   prevRel: Vec | null
   prevT: number
@@ -91,7 +140,8 @@ interface ArmState {
   peakRel: Vec
   peakDist: number
   peakElbow: number
-  peakWristBelowShoulder: number
+  startElbow: number
+  pathLen: number
   lastPunchT: number
   speed: number
   elbow: number
@@ -121,7 +171,8 @@ function newArm(): ArmState {
     peakRel: { x: 0, y: 0 },
     peakDist: 0,
     peakElbow: 180,
-    peakWristBelowShoulder: 0,
+    startElbow: 180,
+    pathLen: 0,
     lastPunchT: -Infinity,
     speed: 0,
     elbow: 180,
@@ -130,6 +181,7 @@ function newArm(): ArmState {
 
 export class PunchDetector {
   config: DetectorConfig
+  classifier: Classifier = classifyHeuristic
   private arms: Record<Hand, ArmState> = { left: newArm(), right: newArm() }
   private smooth: (Vec | null)[] = []
   private scale = 0
@@ -167,6 +219,18 @@ export class PunchDetector {
    * Returns punches whose `t` is the frame timestamp in ms (caller rebases to round time).
    */
   update(landmarks: Landmark[] | undefined, tMs: number, aspect = 1): PunchEvent[] {
+    return this.step(landmarks, tMs, aspect, (c) => {
+      const r = this.classifier(c, this.config)
+      return r && { t: c.t, hand: c.hand, kind: r.kind, lead: c.lead, body: r.body }
+    })
+  }
+
+  /** Like update() but returns every outward movement unclassified (used to extract training samples). */
+  candidates(landmarks: Landmark[] | undefined, tMs: number, aspect = 1): PunchCandidate[] {
+    return this.step(landmarks, tMs, aspect, (c) => c)
+  }
+
+  private step<T>(landmarks: Landmark[] | undefined, tMs: number, aspect: number, judge: (c: PunchCandidate) => T | null): T[] {
     if (!landmarks || landmarks.length < 25) {
       this.visible = { left: false, right: false }
       return []
@@ -211,7 +275,7 @@ export class PunchDetector {
       this.facingAvg = this.facingAvg * 0.95 + f * 0.05
     }
 
-    const out: PunchEvent[] = []
+    const out: T[] = []
     const mpArms: [Hand, Vec | null, Vec | null, Vec | null][] = [
       ['left', pts.ls, pts.le, pts.lw],
       ['right', pts.rs, pts.re, pts.rw],
@@ -224,29 +288,32 @@ export class PunchDetector {
         this.arms[hand].moving = false
         continue
       }
-      const ev = this.updateArm(hand, sh, el, wr, tMs)
+      const ev = this.updateArm(hand, sh, el, wr, tMs, judge)
       if (ev) out.push(ev)
     }
     return out
   }
 
-  private updateArm(hand: Hand, sh: Vec, el: Vec, wr: Vec, t: number): PunchEvent | null {
+  private updateArm<T>(hand: Hand, sh: Vec, el: Vec, wr: Vec, t: number, judge: (c: PunchCandidate) => T | null): T | null {
     const a = this.arms[hand]
     const rel = { x: (wr.x - sh.x) / this.scale, y: (wr.y - sh.y) / this.scale }
     const elbow = angleDeg(sh, el, wr)
-    a.elbow = elbow
 
     if (!a.prevRel) {
       a.prevRel = rel
       a.prevT = t
+      a.elbow = elbow
       return null
     }
     const dt = (t - a.prevT) / 1000
-    if (dt <= 0) return null
+    if (dt <= 0) {
+      a.elbow = elbow
+      return null
+    }
     const speed = len(sub(rel, a.prevRel)) / dt
     a.speed = speed
 
-    let event: PunchEvent | null = null
+    let event: T | null = null
 
     if (!a.moving) {
       if (speed >= this.config.minSpeed && t - a.lastPunchT >= this.config.cooldownMs) {
@@ -254,9 +321,12 @@ export class PunchDetector {
         a.startRel = a.prevRel
         a.startT = a.prevT
         a.peakDist = 0
+        a.startElbow = a.elbow
+        a.pathLen = len(sub(rel, a.prevRel))
         this.trackPeak(a, rel, elbow)
       }
     } else {
+      a.pathLen += len(sub(rel, a.prevRel))
       this.trackPeak(a, rel, elbow)
       const dist = len(sub(rel, a.startRel))
       const stopped = speed < this.config.minSpeed * 0.35
@@ -264,13 +334,15 @@ export class PunchDetector {
       const tooLong = t - a.startT > MAX_PUNCH_MS
       if (stopped || comingBack || tooLong) {
         a.moving = false
-        event = this.classify(hand, a, t)
+        const c = this.candidate(hand, a, t)
+        event = c && judge(c)
         if (event) a.lastPunchT = t
       }
     }
 
     a.prevRel = rel
     a.prevT = t
+    a.elbow = elbow
     return event
   }
 
@@ -280,34 +352,40 @@ export class PunchDetector {
       a.peakDist = d
       a.peakRel = rel
       a.peakElbow = elbow
-      a.peakWristBelowShoulder = rel.y
     }
   }
 
-  private classify(hand: Hand, a: ArmState, t: number): PunchEvent | null {
+  /** Features of a finished movement, or null if it is too small/short or goes back towards guard. */
+  private candidate(hand: Hand, a: ArmState, t: number): PunchCandidate | null {
     const c = this.config
     const dist = a.peakDist
     if (dist < c.minDistance) return null
     if (t - a.startT < MIN_PUNCH_MS) return null
 
     const d = sub(a.peakRel, a.startRel)
-    const forward = d.x * this.facing
+    const fwd = d.x * this.facing
     const up = -d.y // image y grows downward
-    const extGain = len(a.peakRel) - len(a.startRel)
+    if (fwd < -0.2 * dist || up < -0.5 * dist) return null
 
     const leadHand: Hand = c.stance === 'orthodox' ? 'left' : 'right'
-    const lead = hand === leadHand
-    // Wrist ends well below the shoulder line -> body shot.
-    const body = a.peakWristBelowShoulder > 0.45
-
-    if (up >= c.uppercutRatio * dist && up > Math.abs(forward) * 0.8) {
-      return { t, hand, kind: 'uppercut', lead, body: false }
+    return {
+      t,
+      hand,
+      lead: hand === leadHand,
+      features: {
+        fwd,
+        up,
+        dist,
+        peakFwd: a.peakRel.x * this.facing,
+        peakUp: -a.peakRel.y,
+        startFwd: a.startRel.x * this.facing,
+        startUp: -a.startRel.y,
+        peakElbow: a.peakElbow,
+        startElbow: a.startElbow,
+        extGain: len(a.peakRel) - len(a.startRel),
+        durMs: t - a.startT,
+        path: a.pathLen / dist,
+      },
     }
-    if (forward > 0.3 * dist) {
-      if (a.peakElbow < c.hookElbowAngle) return { t, hand, kind: 'hook', lead, body }
-      if (extGain > 0.1) return { t, hand, kind: 'straight', lead, body }
-    }
-    // Backwards / downward movement: hand returning to guard.
-    return null
   }
 }

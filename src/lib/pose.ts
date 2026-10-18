@@ -30,6 +30,17 @@ export function loadPoseLandmarker(): Promise<PoseLandmarker> {
   return pending
 }
 
+let lastTs = 0
+
+/**
+ * VIDEO mode requires strictly increasing timestamps per landmarker, and the camera loop and
+ * clip processing share one instance - route every detectForVideo timestamp through here.
+ */
+export function poseTimestamp(t: number): number {
+  lastTs = Math.max(t, lastTs + 1)
+  return lastTs
+}
+
 /** Skeleton edges to draw (arms highlighted separately). */
 export const BODY_EDGES: [number, number][] = [
   [11, 12], [11, 23], [12, 24], [23, 24], [23, 25], [24, 26], [25, 27], [26, 28],

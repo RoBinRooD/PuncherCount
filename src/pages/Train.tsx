@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { PoseLandmarker } from '@mediapipe/tasks-vision'
-import { PunchDetector, type DetectorDebug, type Landmark } from '../lib/detector'
-import { BODY_EDGES, LEFT_ARM, RIGHT_ARM, loadPoseLandmarker } from '../lib/pose'
+import { PunchDetector, classifyHeuristic, type DetectorDebug, type Landmark } from '../lib/detector'
+import { buildClassifier, type TrainingClip } from '../lib/trainer'
+import { loadPoseLandmarker, poseTimestamp } from '../lib/pose'
+import { drawSkeleton } from '../components/skeleton'
 import type { Settings } from '../lib/settings'
 import { sounds, unlockAudio, vibrate } from '../lib/audio'
-import { saveSession } from '../lib/db'
+import { listClips, saveSession } from '../lib/db'
 import { addToTally, emptyTally, formatDuration, type Tally } from '../lib/stats'
 import { HAND_LABEL, PUNCH_LABEL, PUNCH_TYPES, punchType, type PunchEvent, type RoundRecord } from '../lib/types'
 import { HAND_COLOR, TYPE_COLOR } from '../lib/colors'
@@ -39,6 +41,8 @@ export default function Train({ settings }: { settings: Settings }) {
   const [flash, setFlash] = useState<PunchEvent | null>(null)
   const [debug, setDebug] = useState<DetectorDebug | null>(null)
   const [fps, setFps] = useState(0)
+  const [clips, setClips] = useState<TrainingClip[]>([])
+  const [modelSamples, setModelSamples] = useState(0)
 
   // Mutable timer/session state read inside the rAF loop and the timer interval.
   const s = useRef({
@@ -54,8 +58,16 @@ export default function Train({ settings }: { settings: Settings }) {
   })
 
   useEffect(() => {
-    detectorRef.current.config = { ...settings.detector }
-  }, [settings.detector])
+    void listClips().then(setClips)
+  }, [])
+
+  useEffect(() => {
+    const det = detectorRef.current
+    det.config = { ...settings.detector }
+    const model = settings.useClipModel && clips.length ? buildClassifier(clips, settings.detector) : null
+    det.classifier = model?.classifier ?? classifyHeuristic
+    setModelSamples(model?.samples ?? 0)
+  }, [settings.detector, settings.useClipModel, clips])
 
   // ---------- camera + detection loop ----------
 
@@ -123,7 +135,7 @@ export default function Train({ settings }: { settings: Settings }) {
       if (!lm || video.readyState < 2 || video.currentTime === lastVideoTime) return
       lastVideoTime = video.currentTime
       const now = performance.now()
-      const res = lm.detectForVideo(video, now)
+      const res = lm.detectForVideo(video, poseTimestamp(now))
       const pose = res.landmarks[0] as Landmark[] | undefined
       const aspect = video.videoWidth / video.videoHeight
       for (const p of detectorRef.current.update(pose, now, aspect)) onPunch(p, now)
@@ -359,6 +371,12 @@ export default function Train({ settings }: { settings: Settings }) {
         )}
       </div>
 
+      <p className="text-center text-xs text-ink-3">
+        {modelSamples > 0
+          ? `แยกประเภทหมัดด้วยโมเดลจากคลิปที่สอน (${modelSamples} ตัวอย่าง)`
+          : 'แยกประเภทหมัดด้วยกฎพื้นฐาน · สอนท่าจากคลิปได้ที่แท็บ "สอนท่า"'}
+      </p>
+
       {settings.showDebug && debug && (
         <pre className="overflow-x-auto rounded-xl bg-panel p-3 text-xs text-ink-2">
           {`หันหน้า: ${debug.facing > 0 ? 'ขวา →' : '← ซ้าย'}  scale: ${debug.scale.toFixed(3)}
@@ -380,36 +398,4 @@ function Counter({ label, value, color }: { label: string; value: number; color?
       <div className="tabular text-4xl font-extrabold">{value}</div>
     </div>
   )
-}
-
-function drawSkeleton(g: CanvasRenderingContext2D, pose: Landmark[] | undefined, w: number, h: number, swap: boolean) {
-  g.clearRect(0, 0, w, h)
-  if (!pose) return
-  const line = (edges: [number, number][], color: string, width: number) => {
-    g.strokeStyle = color
-    g.lineWidth = width
-    g.lineCap = 'round'
-    for (const [a, b] of edges) {
-      const pa = pose[a]
-      const pb = pose[b]
-      if ((pa.visibility ?? 1) < 0.2 || (pb.visibility ?? 1) < 0.2) continue
-      g.beginPath()
-      g.moveTo(pa.x * w, pa.y * h)
-      g.lineTo(pb.x * w, pb.y * h)
-      g.stroke()
-    }
-  }
-  const lw = Math.max(3, w / 160)
-  line(BODY_EDGES, 'rgba(240,239,236,0.6)', lw)
-  line(LEFT_ARM, swap ? HAND_COLOR.right : HAND_COLOR.left, lw * 1.6)
-  line(RIGHT_ARM, swap ? HAND_COLOR.left : HAND_COLOR.right, lw * 1.6)
-  for (const i of [15, 16]) {
-    const p = pose[i]
-    if ((p.visibility ?? 1) < 0.2) continue
-    const isLeft = (i === 15) !== swap
-    g.fillStyle = isLeft ? HAND_COLOR.left : HAND_COLOR.right
-    g.beginPath()
-    g.arc(p.x * w, p.y * h, lw * 3, 0, Math.PI * 2)
-    g.fill()
-  }
 }

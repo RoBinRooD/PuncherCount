@@ -3,11 +3,13 @@ import Train from './pages/Train'
 import History from './pages/History'
 import SessionDetail from './pages/SessionDetail'
 import SettingsPage from './pages/Settings'
+import Teach from './pages/Teach'
 import { useSettings } from './lib/settings'
 
 const tabs = [
   { to: '/', label: 'ฝึกซ้อม', icon: '🥊' },
   { to: '/history', label: 'แดชบอร์ด', icon: '📊' },
+  { to: '/teach', label: 'สอนท่า', icon: '🎯' },
   { to: '/settings', label: 'ตั้งค่า', icon: '⚙️' },
 ]
 
@@ -20,6 +22,7 @@ export default function App() {
           <Route path="/" element={<Train settings={settings} />} />
           <Route path="/history" element={<History />} />
           <Route path="/session/:id" element={<SessionDetail />} />
+          <Route path="/teach" element={<Teach settings={settings} update={updateSettings} />} />
           <Route path="/settings" element={<SettingsPage settings={settings} update={updateSettings} />} />
         </Routes>
       </main>
