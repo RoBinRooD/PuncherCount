@@ -10,6 +10,8 @@ export interface Settings {
   showDebug: boolean
   /** Classify punch types with the model learned from labeled clips (when there are any). */
   useClipModel: boolean
+  /** OAuth client ID for Google Drive sync (from Google Cloud Console) */
+  googleClientId: string
   detector: DetectorConfig
 }
 
@@ -21,6 +23,7 @@ export const DEFAULT_SETTINGS: Settings = {
   camera: 'environment',
   showDebug: false,
   useClipModel: true,
+  googleClientId: import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '',
   detector: DEFAULT_DETECTOR_CONFIG,
 }
 

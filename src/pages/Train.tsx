@@ -8,6 +8,7 @@ import { drawSkeleton } from '../components/skeleton'
 import type { Settings } from '../lib/settings'
 import { sounds, unlockAudio, vibrate } from '../lib/audio'
 import { listClips, saveSession } from '../lib/db'
+import { useCloud } from '../lib/cloud'
 import { addToTally, emptyTally, formatDuration, type Tally } from '../lib/stats'
 import { HAND_LABEL, PUNCH_LABEL, PUNCH_TYPES, punchType, type PunchEvent, type RoundRecord } from '../lib/types'
 import { HAND_COLOR, TYPE_COLOR } from '../lib/colors'
@@ -57,9 +58,10 @@ export default function Train({ settings }: { settings: Settings }) {
     startedAt: 0,
   })
 
+  const { revision } = useCloud()
   useEffect(() => {
     void listClips().then(setClips)
-  }, [])
+  }, [revision])
 
   useEffect(() => {
     const det = detectorRef.current

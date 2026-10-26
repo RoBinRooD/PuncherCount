@@ -4,6 +4,9 @@ import { HashRouter } from 'react-router-dom'
 import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'
 import './index.css'
+import { startCloud } from './lib/cloud'
+
+startCloud()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

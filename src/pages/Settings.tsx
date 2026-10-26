@@ -1,5 +1,6 @@
 import { DEFAULT_DETECTOR_CONFIG, type DetectorConfig } from '../lib/detector'
 import type { Settings } from '../lib/settings'
+import CloudPanel from '../components/CloudPanel'
 import { NumberRow, Row, Section, Segmented, Slider, Toggle } from '../components/controls'
 
 interface Props {
@@ -85,8 +86,10 @@ export default function SettingsPage({ settings, update }: Props) {
         </button>
       </Section>
 
+      <CloudPanel settings={settings} update={update} />
+
       <p className="text-xs text-ink-3">
-        ข้อมูลทั้งหมดเก็บในเบราว์เซอร์ของเครื่องนี้เท่านั้น สำรองได้ (รวมคลิปสอนท่า) ที่แท็บแดชบอร์ด → ส่งออก JSON
+        ถ้าไม่เชื่อม Google Drive ข้อมูลจะอยู่ในเบราว์เซอร์ของเครื่องนี้เท่านั้น สำรองได้ (รวมคลิปสอนท่า) ที่แท็บแดชบอร์ด → ส่งออก JSON
       </p>
     </div>
   )

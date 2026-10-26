@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DetectorConfig } from '../lib/detector'
 import type { Settings } from '../lib/settings'
 import { deleteClip, listClips, saveClip, updateClip } from '../lib/db'
+import { uploadClipVideo, useCloud } from '../lib/cloud'
+import CloudBadge from '../components/CloudBadge'
 import { extractClipFrames } from '../lib/clipVideo'
 import { calibrate, evaluate, extractAll, type Calibration, type ClipLabel, type ClipResult, type TrainingClip } from '../lib/trainer'
 import { HAND_LABEL, PUNCH_LABEL, punchType, type Hand, type PunchKind } from '../lib/types'
@@ -34,11 +36,12 @@ export default function Teach({ settings, update }: Props) {
   const previewRef = useRef<HTMLCanvasElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
+  const cloud = useCloud()
   const reload = () => listClips().then(setClips)
+  useEffect(() => () => abortRef.current?.abort(), [])
   useEffect(() => {
     void reload()
-    return () => abortRef.current?.abort()
-  }, [])
+  }, [cloud.revision])
 
   const results = useMemo(() => (clips ? extractAll(clips, config) : []), [clips, config])
   const evaluation = useMemo(() => (clips && clips.length >= 2 ? evaluate(clips, config) : null), [clips, config])
@@ -80,7 +83,12 @@ export default function Teach({ settings, update }: Props) {
           ctrl.signal,
         )
         if (!frames.some((f) => f.p)) throw new Error(`ไม่พบท่าทางคนใน ${file.name}`)
-        await saveClip({ createdAt: Date.now(), name: file.name, label, expectedCount: expected, aspect, frames })
+        const clip: TrainingClip = { createdAt: Date.now(), name: file.name, label, expectedCount: expected, aspect, frames }
+        const id = await saveClip(clip)
+        const d = new Date(clip.createdAt)
+        const pad = (n: number) => String(n).padStart(2, '0')
+        const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}${pad(d.getMinutes())}`
+        void uploadClipVideo(id, clip, file, `${labelText(label, config)} ${stamp}`)
       } catch (e) {
         if (!(e instanceof DOMException && e.name === 'AbortError')) setError(e instanceof Error ? e.message : String(e))
         break
@@ -116,6 +124,13 @@ export default function Teach({ settings, update }: Props) {
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-4 p-3">
       <h1 className="text-xl font-bold">สอนท่าจากคลิป</h1>
+      {cloud.connected ? (
+        <CloudBadge />
+      ) : (
+        <p className="text-xs text-ink-3">
+          คลิปเก็บไว้ในเครื่องนี้เท่านั้น และไม่เก็บไฟล์วิดีโอ เชื่อม Google Drive ได้ที่แท็บตั้งค่า เพื่อเก็บวิดีโอและใช้ได้หลายเครื่อง
+        </p>
+      )}
 
       <Section title="วิธีถ่ายคลิป">
         <ul className="list-disc space-y-1 pl-5 text-sm text-ink-2">

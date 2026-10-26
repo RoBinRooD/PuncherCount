@@ -39,6 +39,10 @@ export interface ClipFrame {
 export interface TrainingClip {
   id?: number
   createdAt: number
+  /** last change to the label or count (for sync); defaults to createdAt */
+  updatedAt?: number
+  /** the original video on Google Drive, if it was uploaded */
+  videoId?: string
   name: string
   label: ClipLabel
   /** how many punches the clip contains, if the user counted them */

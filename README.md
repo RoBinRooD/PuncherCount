@@ -45,6 +45,30 @@
 - จำแนกด้วย k-nearest-neighbours บน feature การเคลื่อนที่ (ระยะ/ทิศ/มุมศอก/ระยะเวลา) — ท่าที่ยังไม่ได้สอนหรือหมัดที่ไม่เหมือนตัวอย่างใดเลยจะใช้ heuristic แทน
 - หน้าสอนท่าแสดงความแม่นยำแบบ leave-one-clip-out เทียบกับ heuristic และปรับ "ความเร็ว/ระยะยื่นขั้นต่ำ" ให้นับตรงกับจำนวนหมัดที่ใส่ไว้
 
+## Google Drive
+
+เก็บข้อมูลทั้งหมดไว้ในโฟลเดอร์ **PuncherCount** บน Google Drive ของคุณ (ใช้หลายเครื่องได้ และข้อมูลไม่หายถ้าล้างเบราว์เซอร์)
+- `index.json` — ประวัติการซ้อมทุกเซต และรายการสิ่งที่ถูกลบ
+- `clip-<เวลา>.json` — คลิปสอนท่า (ป้าย, จำนวนหมัด, ท่าทางที่ถอดจากวิดีโอ)
+- วิดีโอต้นฉบับของคลิปที่เพิ่มตอนเชื่อม Drive อยู่ (ชื่อไฟล์บอกป้ายและเวลา)
+
+แอปซิงก์อัตโนมัติหลังมีการเปลี่ยนแปลง ใช้ scope `drive.file` จึงเห็นเฉพาะไฟล์ที่แอปสร้างเอง
+token ของ Google หมดอายุทุก ~1 ชั่วโมง ถ้าขึ้น "แตะเพื่อเข้าสู่ระบบและซิงก์" ให้แตะปุ่มนั้นอีกครั้ง
+
+### สร้าง OAuth Client ID (ทำครั้งเดียว)
+1. เปิด [Google Cloud Console](https://console.cloud.google.com/) → สร้างโปรเจกต์ใหม่ (ชื่ออะไรก็ได้ เช่น PuncherCount)
+2. **APIs & Services → Library** → ค้นหา **Google Drive API** → Enable
+3. **Google Auth Platform** (หรือ OAuth consent screen) → Get started
+   - App name: PuncherCount, อีเมลของคุณ, Audience: **External**
+   - ที่ **Audience → Test users** เพิ่มอีเมล Google ที่จะใช้ล็อกอิน
+4. **Clients → Create client** → Application type: **Web application**
+   - Authorized JavaScript origins: `https://robinrood.github.io` (เพิ่ม `http://localhost:5173` ถ้าจะทดสอบตอน dev)
+   - ไม่ต้องใส่ Redirect URI
+5. คัดลอก **Client ID** (ลงท้ายด้วย `.apps.googleusercontent.com`) → ในแอป แท็บ **ตั้งค่า → Google Drive** วาง แล้วกด **เชื่อมต่อ Google Drive**
+   - ตอนล็อกอินครั้งแรก Google จะเตือนว่าแอปยังไม่ผ่านการตรวจสอบ ให้กด Continue (เป็นแอปของคุณเอง)
+
+Client ID ไม่ใช่ความลับ จะฝังไว้ในแอปเลยก็ได้: GitHub repo → Settings → Secrets and variables → Actions → **Variables** → เพิ่ม `GOOGLE_CLIENT_ID` แล้ว deploy ใหม่ (ไม่ต้องวางในหน้าตั้งค่าอีก)
+
 ## พัฒนา
 ```bash
 npm install

@@ -4,6 +4,8 @@ import { Bar } from 'react-chartjs-2'
 import { barStyle, stackedScales } from '../components/charts'
 import { importBackup, listClips, listSessions } from '../lib/db'
 import { exportCsv, exportJson, parseBackup } from '../lib/export'
+import { useCloud } from '../lib/cloud'
+import CloudBadge from '../components/CloudBadge'
 import { formatDate, formatDuration, ppm, sessionPunches, sessionWorkMs, tally } from '../lib/stats'
 import { HAND_COLOR } from '../lib/colors'
 import type { SessionRecord } from '../lib/types'
@@ -13,10 +15,11 @@ export default function History() {
   const [msg, setMsg] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  const { revision } = useCloud()
   const reload = () => listSessions().then(setSessions)
   useEffect(() => {
     void reload()
-  }, [])
+  }, [revision])
 
   const summary = useMemo(() => {
     if (!sessions) return null
@@ -50,6 +53,7 @@ export default function History() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-3">
       <h1 className="text-xl font-bold">แดชบอร์ด</h1>
+      <CloudBadge />
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat label="7 วันล่าสุด" value={summary.weekPunches} unit="หมัด" sub={`${summary.weekSessions} เซต`} />
